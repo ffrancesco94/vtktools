@@ -1,15 +1,10 @@
-from __future__ import division
-from builtins import next
-from builtins import range
-from past.utils import old_div
-from builtins import object
 import numpy as np
 import vtk
 import vtk.numpy_interface
 import math
 from vtk.numpy_interface import dataset_adapter as dsa
 
-class PolyLineIterator(object):
+class PolyLineIterator:
 	'''Iterator for point indices in a vtkPolyLine object::
 		polyLine = vtk.vtkPolyLine()
 		for pi in PolyLineIterator(pl):
@@ -29,7 +24,7 @@ class PolyLineIterator(object):
 	def __iter__(self):
 		return self
 
-	def __next__(self):
+	def next(self):
 		'''Advance the iterator and return the current point index'''
 		if self.i < self.n:
 			i = self.i
@@ -37,8 +32,14 @@ class PolyLineIterator(object):
 			return self.pl.GetPointId(i)
 		else:
 			raise StopIteration()
+	def __getitem__(self, id):
+		''' Fetch a certain element by its index'''
+		if id < self.n:
+			return self.pl.GetPointId(id)
+		else:
+			raise StopIteration()
 
-class CellIterator(object):
+class CellIterator:
 	'''Iterator for cells in a vtk dataset::
 		dataSet = vtk.vtkPolyData()
 		for cell in CellIterator(dataSet):
@@ -56,7 +57,7 @@ class CellIterator(object):
 	def __iter__(self):
 		return self
 	
-	def __next__(self):
+	def next(self):
 		'''Advance the iterator and return the current cell'''
 		if self.i < self.n:
 			i = self.i
@@ -145,17 +146,6 @@ def renderDataSet(dataSet, **kwargs):
 	#interactor.Render()
 	interactor.Start()
 
-def cutDataSet(dataSet, point, normal):
-	plane = vtk.vtkPlane()
-	plane.SetOrigin(point[0], point[1], point[2])
-	plane.SetNormal(normal[0], normal[1], normal[2])
-	
-	cutter = vtk.vtkCutter()
-	cutter.SetInputData(dataSet)
-	cutter.SetCutFunction(plane)
-	cutter.Update()
-	return cutter.GetOutput()
-
 def cutPolySurface(dataSet, point, normal):
 	''' Cut a surface with a plane, and return an ordered list
 	of points around the circumference of the resulting curve. The cut
@@ -175,8 +165,17 @@ def cutPolySurface(dataSet, point, normal):
 	'''
 
 	# Generate surface cutcurve
-	cutData = cutDataSet(dataSet, point, normal)
+	plane = vtk.vtkPlane()
+	plane.SetOrigin(point[0], point[1], point[2])
+	plane.SetNormal(normal[0], normal[1], normal[2])
 	
+	cutter = vtk.vtkCutter()
+	cutter.SetInputData(dataSet)
+	cutter.SetCutFunction(plane)
+	cutter.Update()
+
+	# Get cut line edges
+	cutData = cutter.GetOutput()
 	edges = []
 	cutLines = cutData.GetLines()
 	cutLines.InitTraversal()
@@ -192,21 +191,17 @@ def cutPolySurface(dataSet, point, normal):
 	startPtId = locator.FindClosestPoint(point)
 
 	pointIds = [startPtId]
-	try:
-		while True:
-			# Find the edge that starts at the latest point 
-			pred = (v[1] for v in edges if v[0] == pointIds[-1])
-			currentPtId = next(pred)
+	while True:
+		# Find the edge that starts at the latest point 
+		pred = (v[1] for v in edges if v[0] == pointIds[-1])
+		currentPtId = pred.next()
 
-			# Check if we've returned to the start point
-			if currentPtId == startPtId:
-				break
+		# Check if we've returned to the start point
+		if currentPtId == startPtId:
+			break
 
-			pointIds.append(currentPtId)
-		else:	# if no break occured
-			raise RuntimeError('The cut curve does not form a closed loop')
-	except:
-		# We reached the end of the edge graph without getting back to the beginning
+		pointIds.append(currentPtId)
+	else:	# if no break occured
 		raise RuntimeError('The cut curve does not form a closed loop')
 	cutCurve = dsa.WrapDataObject(cutData)
 	return cutCurve.Points[pointIds]
@@ -239,7 +234,7 @@ def createVtkCylinder(**kwargs):
 		
 		# Evaluate rotation angle
 		rotAngle = np.arccos(np.dot(yDir, axis))
-		transform.RotateWXYZ(old_div(-180*rotAngle,np.pi), rotVec)
+		transform.RotateWXYZ(-180*rotAngle/np.pi, rotVec)
 
 	transform.Translate(-origin)
 	cylinder.SetTransform(transform)
@@ -281,117 +276,3 @@ def cutPolyData(dataSet, **kwargs):
 		clipper.InsideOutOn()
 		clipper.Update()
 		return clipper.GetOutput()
-
-def clearCellData(dataSet):
-	for i in reversed(list(range(dataSet.GetCellData().GetNumberOfArrays()))):
-		dataSet.GetCellData().RemoveArray(i)
-
-def clearPointData(dataSet):
-	for i in reversed(list(range(dataSet.GetPointData().GetNumberOfArrays()))):
-		dataSet.GetPointData().RemoveArray(i)
-
-def createQuadCells(Nx, Ny, **kwargs):
-	''' Create quad cells corresponding to a Nx x Ny grid. 
-	Parameters:
-		:Nx (int): Number of points in the first dimension
-		:Ny (int): Number of points in the second dimension
-	Keyword arguments:
-		:cutsectionIsClosed (bool or [bool]): Flag to indicate whether to wrap around the indices
-		This is useful for creating a cell distribution for a cylinder
-		Can also be an array of bools each indicating whether each of the sections in the x-direction should be wrapped 
-	'''
-	cells = vtk.vtkCellArray()
-	cutsectionIsClosed = kwargs.get('cutsectionIsClosed', True)
-
-	for i in range(1, Nx):
-		if isinstance(cutsectionIsClosed, bool):
-			wrapAround = cutsectionIsClosed
-		else:
-			# Assume array like
-			wrapAround = cutsectionIsClosed[i] and cutsectionIsClosed[i-1]
-
-		for j in range(0, Ny):
-			quad = vtk.vtkQuad()
-
-			if j == 0:
-				if wrapAround:
-					quad.GetPointIds().SetId(0, i*Ny)
-					quad.GetPointIds().SetId(1, (i+1)*Ny-1)
-					quad.GetPointIds().SetId(2, i*Ny-1)
-					quad.GetPointIds().SetId(3, (i-1)*Ny)
-			else:
-				quad.GetPointIds().SetId(0, i*Ny+j)
-				quad.GetPointIds().SetId(1, i*Ny+j-1)
-				quad.GetPointIds().SetId(2, (i-1)*Ny + j-1)
-				quad.GetPointIds().SetId(3, (i-1)*Ny + j)
-			cells.InsertNextCell(quad)
-	return cells
-
-def createLineCells(Nx, Ny, **kwargs):
-	''' Create lines corresponding to a Nx x Ny grid. 
-	Parameters:
-		:Nx (int): Number of points in the first dimension
-		:Ny (int): Number of points in the second dimension
-	Keyword arguments:
-		:cutsectionIsClosed (bool or [bool]): Flag to indicate whether to wrap around the indices
-		This is useful for creating a cell distribution for a cylinder
-		Can also be an array of bools each indicating whether each of the sections in the x-direction should be wrapped 
-	'''
-	cells = vtk.vtkCellArray()
-	cutsectionIsClosed = kwargs.get('cutsectionIsClosed', True)
-
-	for i in range(Nx):
-		if isinstance(cutsectionIsClosed, bool):
-			wrapAround = cutsectionIsClosed
-		else:
-			# Assume array like
-			wrapAround = cutsectionIsClosed[i] and cutsectionIsClosed[i-1]
-
-		cell = vtk.vtkPolyLine()
-		startId = i*Ny
-
-		if wrapAround:
-			cell.GetPointIds().SetNumberOfIds(Ny+1)
-			cell.GetPointIds().SetId(Ny, startId)
-		else:
-			cell.GetPointIds().SetNumberOfIds(Ny)
-
-		for j in range(Ny):
-			cell.GetPointIds().SetId(j, startId+j)
-
-		cells.InsertNextCell(cell)
-	return cells
-
-def computeCellVolumes(dataSet):
-	vols = np.zeros(dataSet.GetNumberOfCells())
-	for i, cell in enumerate(CellIterator(dataSet)):
-		if cell.GetCellDimension() != 3:
-			vols[i] = 0
-		else:
-			ptIds = vtk.vtkIdList()
-			pts = vtk.vtkPoints()
-			if cell.Triangulate(0, ptIds, pts) != 1:
-				raise RuntimeError("Unable to triangulate the cell")
-			for j in range(0, ptIds.GetNumberOfIds() // 4):
-				vols[i] += vtk.vtkTetra.ComputeVolume(pts.GetPoint(4*j), pts.GetPoint(4*j+1), pts.GetPoint(4*j+2), pts.GetPoint(4*j+3))
-	return vols
-
-def computeCellCenters(dataSet):
-	pCoords = [0, 0, 0]
-	x = [0, 0, 0]
-	subId = vtk.mutable(0)
-	weights = []
-	cellCenters = np.zeros((dataSet.GetNumberOfCells(), 3))
-	for i in range(dataSet.GetNumberOfCells()):
-		cell = dataSet.GetCell(i)
-
-		# Get parametric coordinates for the cell center
-		cell.GetParametricCenter(pCoords)
-
-		if len(weights) < cell.GetNumberOfPoints():
-			weights = [0 for j in range(cell.GetNumberOfPoints())]
-
-		cell.EvaluateLocation(subId, pCoords, x, weights)
-		
-		cellCenters[i, :] = x
-	return cellCenters

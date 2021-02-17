@@ -1,6 +1,3 @@
-from __future__ import print_function
-from builtins import str
-from builtins import range
 import numpy as np
 import vtk
 import vtk.numpy_interface
@@ -44,10 +41,6 @@ def writeDataSet(dataSet, fileName):
 	elif fileExtension == '.vtu':
 		_verifyUnstructuredGrid(dataSet)
 		writer = vtk.vtkXMLUnstructuredGridWriter()
-	elif fileExtension == '.vtm':
-		if not dataSet.IsA('vtkMultiBlockDataSet'):
-			raise RuntimeError('The dataset is not a vtkMultiBlockDataSet')
-		writer = vtk.vtkXMLMultiBlockDataWriter()
 	elif fileExtension == '.vtk':
 		if dataSet.IsA('vtkUnstructuredGrid'):
 			writer = vtk.vtkUnstructuredGridWriter()
@@ -67,23 +60,7 @@ def writeDataSet(dataSet, fileName):
 	writer.SetFileName(fileName)
 	writer.Write()
 
-'''def _createVTKReader(fileName):
-	# Determine reader type from the header
-	with open(fileName, 'r') as f:
-		line = f.readline() # Comment line
-		line = f.readline() # name
-		binaryOrAscii = f.readline().strip().lower() # ASCII or BINARY
-		datasetType = f.readline().split(' ')[1].strip().lower() # DATASET dataset_type
-
-		if datasetType == 'polydata':
-			return vtk.vtkPolyDataReader()
-		elif datasetType == 'unstructured_grid':
-			return vtk.vtkUnstructuredGridReader()
-		else:
-			raise RuntimeError('Could not determine datatype / unsupported datatype: ' + datasetType)'''
-
-
-def readDataSet(fileName, **kwargs):
+def readDataSet(fileName):
 	"""Read the dataset from a file. The reader type used is determined from the file extension.
 
 	Returns:
@@ -112,32 +89,18 @@ def readDataSet(fileName, **kwargs):
 		reader = vtk.vtkXMLUnstructuredGridReader()
 	elif fileExtension == '.vti':
 		reader = vtk.vtkXMLImageDataReader()
-	elif fileExtension == '.vtm':
-		reader = vtk.vtkXMLMultiBlockDataReader()
 	elif fileExtension == '.stl':
 		reader = vtk.vtkSTLReader()
-	elif fileExtension == '.vtk':
-		#reader = _createVTKReader(fileName)
-		reader = vtk.vtkDataSetReader()
 	elif fileExtension == '.case':
 		reader = vtk.vtkEnSightGoldBinaryReader()
-		for k,v in list(kwargs.items()):
-			if k == 'disableCellArrays':
-				for arrName in v:
-					reader.GetCellDataArraySelection().DisableArray(arrName)
-			elif k == 'disablePointArrays':
-				for arrName in v:
-					reader.GetPointDataArraySelection().DisableArray(arrName)
-			else:
-				raise RuntimeError('Unknown keyword argument' + str(k))
 	else:
 		raise RuntimeError('Unknown file extension', fileExtension)
 	
 	if fileExtension == '.case':
 		reader.SetCaseFileName(fileName)		
 	else:
-		reader.SetFileName(fileName)	
-
+		reader.SetFileName(fileName)
+	
 	reader.Update()
 	return reader.GetOutput()
 
@@ -228,18 +191,6 @@ def createPolyLine(points):
 
 	return pd
 	
-def getBlockNames(dataSet):
-	if not dataSet.IsA('vtkCompositeDataSet'):
-		raise RuntimeError('Cannot get a block from a non-composite dataset')
-	blockNames = []
-	it = dataSet.NewIterator()
-	while not it.IsDoneWithTraversal():
-		blockName = it.GetCurrentMetaData().Get(vtk.vtkCompositeDataSet.NAME())
-		currentBlock = it.GetCurrentDataObject()
-		blockNames.append(blockName.strip())
-		it.GoToNextItem()
-	dataSet.UnRegister(it)	# This is needed to prevent memory leaks
-	return blockNames
 
 def printBlockNames(dataSet):
 	if not dataSet.IsA('vtkCompositeDataSet'):
@@ -272,15 +223,15 @@ def _getBlockByName(dataSet, name):
 		blockName = it.GetCurrentMetaData().Get(vtk.vtkCompositeDataSet.NAME())
 		currentBlock = it.GetCurrentDataObject()
 		if blockName.rstrip() == name:
-			dataSet.UnRegister(it)	# This is needed to prevent memory leaks
+			#dataSet.UnRegister(it)	# This is needed to prevent memory leaks
 			return currentBlock
 		if it.GetCurrentDataObject().IsA('vtkCompositeDataSet'):
 			d = _getBlockByName(currentBlock, name)
 			if d != None:
-				dataSet.UnRegister(it)	# This is needed to prevent memory leaks
+			#	dataSet.UnRegister(it)	# This is needed to prevent memory leaks
 				return d
 		it.GoToNextItem()
-	dataSet.UnRegister(it)	# This is needed to prevent memory leaks
+	#dataSet.UnRegister(it)	# This is needed to prevent memory leaks
 	return None
 
 def createFolder(directory):
